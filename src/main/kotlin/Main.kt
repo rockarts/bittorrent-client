@@ -33,8 +33,12 @@ fun decodeBencodeInt(bencodedString: String): Int {
     val end = bencodedString[bencodedString.length - 1]
     if (firstVal == 'i' && end == 'e') {
         val integerToDecode = bencodedString.substring(1, bencodedString.length - 1)
-        val parsed = Integer.parseInt(integerToDecode)
-        return parsed
+        try {
+            val parsed = Integer.parseInt(integerToDecode)
+            return parsed
+        } catch (e: NumberFormatException) {
+            return 0
+        }
     }
     return 0
 }
