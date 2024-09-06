@@ -1,7 +1,7 @@
-import com.google.gson.Gson;
+import com.google.gson.Gson
 import java.math.BigInteger
-
-// import com.dampcake.bencode.Bencode; - available if you need it!
+import com.dampcake.bencode.Bencode
+import com.dampcake.bencode.Type
 
 val gson = Gson()
 
@@ -14,19 +14,35 @@ fun main(args: Array<String>) {
             // Uncomment this block to pass the first stage
              val bencodedValue = args[1]
 
-            when {
-                Character.isDigit(bencodedValue[0]) -> {
-                    val decoded = decodeBencode(bencodedValue)
-                    println(gson.toJson(decoded))
-                }
-                Character.isLetter(bencodedValue[0]) -> {
-                    val decoded = decodeBencodeInt(bencodedValue)
-                    println(gson.toJson(decoded))
-                }
-            }
+            val decoded = decodeBencode(bencodedValue)
+            println(gson.toJson(decoded))
              return
         }
         else -> println("Unknown command $command")
+    }
+}
+
+fun decodeBencode(encodedString: String): Any {
+    val bencode = Bencode()
+    val bytes = encodedString.toByteArray()
+
+    return when {
+        encodedString.startsWith("d") -> {
+            val decoded = bencode.decode(bytes, Type.DICTIONARY) as Map<String, Any>
+            decoded.mapValues { (_, value) ->
+                if (value is ByteArray) String(value) else value
+            }
+        }
+        encodedString.startsWith("l") -> {
+            val decoded = bencode.decode(bytes, Type.LIST) as List<Any>
+            decoded.map { if (it is ByteArray) String(it) else it }
+        }
+        encodedString.startsWith("i") -> {
+            bencode.decode(bytes, Type.NUMBER)
+        }
+        else -> {
+            String(bencode.decode(bytes, Type.STRING) as ByteArray)
+        }
     }
 }
 
@@ -45,7 +61,7 @@ fun decodeBencodeInt(bencodedString: String): BigInteger {
     return BigInteger.ZERO
 }
 
-fun decodeBencode(bencodedString: String): String {
+fun decodeBencodeString(bencodedString: String): String {
     when {
         Character.isDigit(bencodedString[0]) -> {
             val firstColonIndex = bencodedString.indexOfFirst { it == ':' }
