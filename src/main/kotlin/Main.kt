@@ -1,4 +1,6 @@
 import com.google.gson.Gson;
+import java.math.BigInteger
+
 // import com.dampcake.bencode.Bencode; - available if you need it!
 
 val gson = Gson()
@@ -28,19 +30,19 @@ fun main(args: Array<String>) {
     }
 }
 
-fun decodeBencodeInt(bencodedString: String): Int {
+fun decodeBencodeInt(bencodedString: String): BigInteger {
     val firstVal = bencodedString[0]
     val end = bencodedString[bencodedString.length - 1]
     if (firstVal == 'i' && end == 'e') {
         val integerToDecode = bencodedString.substring(1, bencodedString.length - 1)
         try {
-            val parsed = Integer.parseInt(integerToDecode)
+            val parsed =  integerToDecode.toBigInteger()
             return parsed
         } catch (e: NumberFormatException) {
-            return 0
+            return BigInteger.ZERO
         }
     }
-    return 0
+    return BigInteger.ZERO
 }
 
 fun decodeBencode(bencodedString: String): String {
