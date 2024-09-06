@@ -11,12 +11,32 @@ fun main(args: Array<String>) {
         "decode" -> {
             // Uncomment this block to pass the first stage
              val bencodedValue = args[1]
-             val decoded = decodeBencode(bencodedValue)
-             println(gson.toJson(decoded))
+
+            when {
+                Character.isDigit(bencodedValue[0]) -> {
+                    val decoded = decodeBencode(bencodedValue)
+                    println(gson.toJson(decoded))
+                }
+                Character.isLetter(bencodedValue[0]) -> {
+                    val decoded = decodeBencodeInt(bencodedValue)
+                    println(gson.toJson(decoded))
+                }
+            }
              return
         }
         else -> println("Unknown command $command")
     }
+}
+
+fun decodeBencodeInt(bencodedString: String): Int {
+    val firstVal = bencodedString[0]
+    val end = bencodedString[bencodedString.length - 1]
+    if (firstVal == 'i' && end == 'e') {
+        val integerToDecode = bencodedString.substring(1, bencodedString.length - 1)
+        val parsed = Integer.parseInt(integerToDecode)
+        return parsed
+    }
+    return 0
 }
 
 fun decodeBencode(bencodedString: String): String {
