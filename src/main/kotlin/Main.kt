@@ -2,7 +2,8 @@ import com.google.gson.Gson
 import java.math.BigInteger
 import com.dampcake.bencode.Bencode
 import com.dampcake.bencode.Type
-
+import java.io.File
+import java.io.FileInputStream
 val gson = Gson()
 
 fun main(args: Array<String>) {
@@ -10,8 +11,11 @@ fun main(args: Array<String>) {
     //println("Logs from your program will appear here!")
     val command = args[0]
     when (command) {
+        "info" -> {
+            val torrentFile = args[1]
+            decodeTorrentFile(torrentFile)
+        }
         "decode" -> {
-            // Uncomment this block to pass the first stage
              val bencodedValue = args[1]
 
             val decoded = decodeBencode(bencodedValue)
@@ -22,12 +26,57 @@ fun main(args: Array<String>) {
     }
 }
 
+fun decodeTorrentFile(torrentFile: String) {
+    val fileBytes = File(torrentFile).readBytes()
+    val bencode = Bencode()
+    val torrentData = bencode.decode(fileBytes, Type.DICTIONARY)
+    val url = torrentData["announce"]
+    val info = torrentData["info"] as MutableMap<*, *>
+    val length = info["length"]
+    
+    println("Tracker URL: $url")
+    println("Length: $length")
+}
+
+fun decodeBencodeBytes(encodedBytes: ByteArray): Any {
+    val bencode = Bencode()
+
+    return when (encodedBytes.firstOrNull()?.toInt()?.toChar()) {
+        'd' -> {
+            val decoded = bencode.decode(encodedBytes, Type.DICTIONARY) as Map<ByteArray, Any>
+            decoded.mapKeys { (key, _) -> key.decodeToString() }
+                .mapValues { (_, value) ->
+                    when (value) {
+                        is ByteArray -> value // Keep ByteArray as is
+                        else -> value
+                    }
+                }
+        }
+        'l' -> {
+            val decoded = bencode.decode(encodedBytes, Type.LIST) as List<Any>
+            decoded.map {
+                when (it) {
+                    is ByteArray -> it // Keep ByteArray as is
+                    else -> it
+                }
+            }
+        }
+        'i' -> {
+            bencode.decode(encodedBytes, Type.NUMBER)
+        }
+        else -> {
+            bencode.decode(encodedBytes, Type.STRING)
+        }
+    }
+}
+
 fun decodeBencode(encodedString: String): Any {
     val bencode = Bencode()
     val bytes = encodedString.toByteArray()
 
     return when {
         encodedString.startsWith("d") -> {
+            println(bytes)
             val decoded = bencode.decode(bytes, Type.DICTIONARY) as Map<String, Any>
             decoded.mapValues { (_, value) ->
                 if (value is ByteArray) String(value) else value
@@ -41,6 +90,7 @@ fun decodeBencode(encodedString: String): Any {
             bencode.decode(bytes, Type.NUMBER)
         }
         else -> {
+            println(bytes)
             bencode.decode(bytes, Type.STRING)
         }
     }
