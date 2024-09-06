@@ -40,8 +40,11 @@ fun decodeBencode(encodedString: String): Any {
         encodedString.startsWith("i") -> {
             bencode.decode(bytes, Type.NUMBER)
         }
-        else -> {
+        Character.isDigit(encodedString[0]) -> {
             String(bencode.decode(bytes, Type.STRING) as ByteArray)
+        }
+        else -> {
+            TODO("Some other type not supported")
         }
     }
 }
