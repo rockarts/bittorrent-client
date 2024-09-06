@@ -33,41 +33,9 @@ fun decodeTorrentFile(torrentFile: String) {
     val url = torrentData["announce"]
     val info = torrentData["info"] as MutableMap<*, *>
     val length = info["length"]
-    
+
     println("Tracker URL: $url")
     println("Length: $length")
-}
-
-fun decodeBencodeBytes(encodedBytes: ByteArray): Any {
-    val bencode = Bencode()
-
-    return when (encodedBytes.firstOrNull()?.toInt()?.toChar()) {
-        'd' -> {
-            val decoded = bencode.decode(encodedBytes, Type.DICTIONARY) as Map<ByteArray, Any>
-            decoded.mapKeys { (key, _) -> key.decodeToString() }
-                .mapValues { (_, value) ->
-                    when (value) {
-                        is ByteArray -> value // Keep ByteArray as is
-                        else -> value
-                    }
-                }
-        }
-        'l' -> {
-            val decoded = bencode.decode(encodedBytes, Type.LIST) as List<Any>
-            decoded.map {
-                when (it) {
-                    is ByteArray -> it // Keep ByteArray as is
-                    else -> it
-                }
-            }
-        }
-        'i' -> {
-            bencode.decode(encodedBytes, Type.NUMBER)
-        }
-        else -> {
-            bencode.decode(encodedBytes, Type.STRING)
-        }
-    }
 }
 
 fun decodeBencode(encodedString: String): Any {
@@ -90,7 +58,6 @@ fun decodeBencode(encodedString: String): Any {
             bencode.decode(bytes, Type.NUMBER)
         }
         else -> {
-            println(bytes)
             bencode.decode(bytes, Type.STRING)
         }
     }
