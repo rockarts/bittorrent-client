@@ -2,6 +2,7 @@ import com.google.gson.Gson
 import com.dampcake.bencode.Bencode
 import com.dampcake.bencode.Type
 import java.io.File
+import java.nio.ByteBuffer
 import java.security.MessageDigest
 
 val gson = Gson()
@@ -31,16 +32,45 @@ fun decodeTorrentFile(torrentFile: String) {
     val url = torrentData["announce"]
     val info = torrentData["info"] as Map<*, *>
     val length = info["length"]
+    val pieceLength = info["piece length"]
+    val pieces = info["pieces"]
+    val charset = Charsets.UTF_8
+    //val test = charset.decode(pieces as ByteBuffer).toString()
+    //printMap(torrentData)
 
     //We need to preserve UTF-16 for the info section.
     val bencode2 = Bencode(true)
     val infoData = bencode2.decode(fileBytes, Type.DICTIONARY) as Map<String, Any>
-    val map = infoData["info"] as Map<*, *>
-    val encodedInfo = bencode2.encode(map)
 
-    //Calculate the SHA-1
+    val map = infoData["info"] as Map<*, *>
+
+    var index = 0
+    val list = mutableListOf<String>()
+
+    val buffer = map["pieces"] as ByteBuffer
+
+    val byteArray = buffer.array()
+    val string = byteArray.toHexString()
+    println(string)
+    while ((index * 20) + 20 <= byteArray.size) {
+        val chunk = byteArray.sliceArray(index * 20..<(index * 20) + 20)
+        list.add(chunk.toHexString())
+        index += 1
+    }
+
+    val encodedInfo = bencode2.encode(map)
     val digest = MessageDigest.getInstance("SHA-1")
     val bytes = digest.digest(encodedInfo)
+    val result = myHexString(bytes)
+
+    println("Tracker URL: $url")
+    println("Length: $length")
+    println("Info Hash: $result")
+    println("Piece Length: $pieceLength")
+    println("Piece Hashes: \n${list.joinToString(separator = "\n")}")
+}
+
+fun myHexString(bytes:ByteArray): String {
     val result = StringBuilder(bytes.size * 2)
     val HEX_CHARS = "0123456789abcdef"
     bytes.forEach {
@@ -48,11 +78,17 @@ fun decodeTorrentFile(torrentFile: String) {
         result.append(HEX_CHARS[i shr 4 and 0x0f])
         result.append(HEX_CHARS[i and 0x0f])
     }
-
-    println("Tracker URL: $url")
-    println("Length: $length")
-    println("Info Hash: $result")
+    return result.toString()
 }
+
+fun ByteArray.toHexString(): String {
+    return if (this.size > 20) {
+        "ByteArray(${this.size} bytes)"
+    } else {
+        this.joinToString("") { "%02x".format(it) }
+    }
+}
+
 
 fun decodeBencode(benCodedValue: String): Any {
     val bencode = Bencode()
