@@ -25,18 +25,22 @@ fun main(args: Array<String>) {
 
 fun decodeTorrentFile(torrentFile: String) {
     val fileBytes = File(torrentFile).readBytes()
+    //Decode the non UTF-16 data normally
     val bencode = Bencode(false)
     val torrentData = bencode.decode(fileBytes, Type.DICTIONARY) as Map<String, Any>
     val url = torrentData["announce"]
     val info = torrentData["info"] as Map<*, *>
+    val length = info["length"]
 
+    //We need to preserve UTF-16 for the info section.
     val bencode2 = Bencode(true)
-    val encoded:ByteArray = bencode2.encode(info)
-    val infoData = bencode2.decode(encoded, Type.DICTIONARY) as Map<*, *>
+    val infoData = bencode2.decode(fileBytes, Type.DICTIONARY) as Map<String, Any>
+    val map = infoData["info"] as Map<*, *>
+    val encodedInfo = bencode2.encode(map)
 
-    val json = gson.toJson(infoData)
-
-    val bytes = MessageDigest.getInstance("SHA-1").digest(json.toByteArray())
+    //Calculate the SHA-1
+    val digest = MessageDigest.getInstance("SHA-1")
+    val bytes = digest.digest(encodedInfo)
     val result = StringBuilder(bytes.size * 2)
     val HEX_CHARS = "0123456789abcdef"
     bytes.forEach {
@@ -44,12 +48,12 @@ fun decodeTorrentFile(torrentFile: String) {
         result.append(HEX_CHARS[i shr 4 and 0x0f])
         result.append(HEX_CHARS[i and 0x0f])
     }
-    val length = info["length"]
 
     println("Tracker URL: $url")
     println("Length: $length")
     println("Info Hash: $result")
 }
+
 fun decodeBencode(benCodedValue: String): Any {
     val bencode = Bencode()
     return when {
