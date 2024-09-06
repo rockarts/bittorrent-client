@@ -32,9 +32,8 @@ fun decodeTorrentFile(torrentFile: String) {
 
     val encoded:ByteArray = bencode.encode(info)
     val infoData = bencode.decode(encoded, Type.DICTIONARY) as Map<String, Any>
-    println(gson.toJson(infoData))
- val json = gson.toJson(infoData)
-    
+    val json = gson.toJson(infoData)
+
     val bytes = MessageDigest.getInstance("SHA-1").digest(json.toByteArray())
     val result = StringBuilder(bytes.size * 2)
     val HEX_CHARS = "0123456789abcdef"
