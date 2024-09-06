@@ -16,11 +16,10 @@ fun main(args: Array<String>) {
             decodeTorrentFile(torrentFile)
         }
         "decode" -> {
-             val bencodedValue = args[1]
-
+            val bencodedValue = args[1]
             val decoded = decodeBencode(bencodedValue)
             println(gson.toJson(decoded))
-             return
+            return
         }
         else -> println("Unknown command $command")
     }
@@ -37,54 +36,15 @@ fun decodeTorrentFile(torrentFile: String) {
     println("Tracker URL: $url")
     println("Length: $length")
 }
-
-fun decodeBencode(encodedString: String): Any {
+fun decodeBencode(benCodedValue: String): Any {
     val bencode = Bencode()
-    val bytes = encodedString.toByteArray()
-
     return when {
-        encodedString.startsWith("d") -> {
-            println(bytes)
-            val decoded = bencode.decode(bytes, Type.DICTIONARY) as Map<String, Any>
-            decoded.mapValues { (_, value) ->
-                if (value is ByteArray) String(value) else value
-            }
-        }
-        encodedString.startsWith("l") -> {
-            val decoded = bencode.decode(bytes, Type.LIST) as List<Any>
-            decoded.map { if (it is ByteArray) String(it) else it }
-        }
-        encodedString.startsWith("i") -> {
-            bencode.decode(bytes, Type.NUMBER)
-        }
-        else -> {
-            bencode.decode(bytes, Type.STRING)
-        }
-    }
-}
+        benCodedValue[0].isDigit() -> bencode.decode(benCodedValue.toByteArray(), Type.STRING)
+        benCodedValue[0] == 'i' -> bencode.decode(benCodedValue.toByteArray(), Type.NUMBER)
+        benCodedValue[0] == 'l' -> bencode.decode(benCodedValue.toByteArray(), Type.LIST)
+        benCodedValue[0] == 'd' -> bencode.decode(benCodedValue.toByteArray(), Type.DICTIONARY)
+        else -> return ""
 
-fun decodeBencodeInt(bencodedString: String): BigInteger {
-    val firstVal = bencodedString[0]
-    val end = bencodedString[bencodedString.length - 1]
-    if (firstVal == 'i' && end == 'e') {
-        val integerToDecode = bencodedString.substring(1, bencodedString.length - 1)
-        try {
-            val parsed =  integerToDecode.toBigInteger()
-            return parsed
-        } catch (e: NumberFormatException) {
-            return BigInteger.ZERO
-        }
     }
-    return BigInteger.ZERO
-}
 
-fun decodeBencodeString(bencodedString: String): String {
-    when {
-        Character.isDigit(bencodedString[0]) -> {
-            val firstColonIndex = bencodedString.indexOfFirst { it == ':' }
-            val length = Integer.parseInt(bencodedString.substring(0, firstColonIndex))
-            return bencodedString.substring(firstColonIndex + 1, firstColonIndex + 1 + length)
-        }
-        else -> TODO("Only strings are supported at the moment")
-    }
 }
