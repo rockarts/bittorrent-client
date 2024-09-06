@@ -25,13 +25,15 @@ fun main(args: Array<String>) {
 
 fun decodeTorrentFile(torrentFile: String) {
     val fileBytes = File(torrentFile).readBytes()
-    val bencode = Bencode()
+    val bencode = Bencode(false)
     val torrentData = bencode.decode(fileBytes, Type.DICTIONARY) as Map<String, Any>
     val url = torrentData["announce"]
     val info = torrentData["info"] as Map<*, *>
 
-    val encoded:ByteArray = bencode.encode(info)
-    val infoData = bencode.decode(encoded, Type.DICTIONARY) as Map<String, Any>
+    val bencode2 = Bencode(true)
+    val encoded:ByteArray = bencode2.encode(info)
+    val infoData = bencode2.decode(encoded, Type.DICTIONARY) as Map<*, *>
+
     val json = gson.toJson(infoData)
 
     val bytes = MessageDigest.getInstance("SHA-1").digest(json.toByteArray())
