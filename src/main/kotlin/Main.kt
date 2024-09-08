@@ -1,10 +1,15 @@
 import com.google.gson.Gson
 import com.dampcake.bencode.Bencode
 import com.dampcake.bencode.Type
+import java.io.BufferedReader
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.File
+import java.io.PrintWriter
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.net.HttpURLConnection
+import java.net.Socket
 import java.net.URL
 import java.net.URLEncoder
 
@@ -28,7 +33,77 @@ fun main(args: Array<String>) {
             val info = decodeTorrentFile(torrentFile, true)
             getPeers(info)
         }
+        "handshake" -> {
+            val torrentFile = args[1]
+            val peer = args[2]
+            val info = decodeTorrentFile(torrentFile, true)
+            val infoHash = info.get("info_hash").toString()
+
+            val address = peer.split(":")
+            val host = address[0]
+            val port = address[1].toInt()
+
+            val peers = mutableListOf<String>() //getPeers(info)
+            performHandshake(peers, host, port, infoHash)
+        }
         else -> println("Unknown command $command")
+    }
+}
+
+fun performHandshake(peers: MutableList<String>, host:String, port:Int, infoHash:String) {
+//    val firstPeer = peers[0]
+//    val address = firstPeer.split(":")
+//    val host = address[0]
+//    val port = address[1].toInt()
+    val socket = Socket(host, port)
+    val outputStream = DataOutputStream(socket.getOutputStream())
+    val inputStream = DataInputStream(socket.getInputStream())
+    try {
+        val protocolName = "BitTorrent protocol"
+        val reserved = ByteArray(8) // 8 reserved bytes, all set to 0
+        // Convert infoHash and peerId from hex string to ByteArray
+        val infoHashBytes = infoHash.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val peerId = "00112233445566778899"
+        val peerIdBytes = peerId.toByteArray()
+
+        outputStream.writeByte(19)
+        outputStream.write(protocolName.toByteArray())
+        outputStream.write(reserved)
+        outputStream.write(infoHashBytes)
+        outputStream.write(peerIdBytes)
+
+        outputStream.flush()
+
+        // Receive handshake response
+        val responsePstrlen = inputStream.readByte().toInt()
+        if (responsePstrlen != 19) {
+            throw Exception("Invalid pstrlen in response: $responsePstrlen")
+        }
+
+        val responsePstr = ByteArray(19)
+        inputStream.readFully(responsePstr)
+        val responseProtocol = String(responsePstr)
+        if (responseProtocol != protocolName) {
+            throw Exception("Invalid protocol in response: $responseProtocol")
+        }
+
+        val responseReserved = ByteArray(8)
+        inputStream.readFully(responseReserved)
+
+        val responseInfoHash = ByteArray(20)
+        inputStream.readFully(responseInfoHash)
+        if (!responseInfoHash.contentEquals(infoHashBytes)) {
+            throw Exception("Info hash mismatch in response")
+        }
+
+        val responsePeerId = ByteArray(20)
+        inputStream.readFully(responsePeerId)
+
+        //println("BitTorrent handshake response received successfully")
+        println("Peer ID: ${responsePeerId.joinToString("") { "%02x".format(it) }}")
+
+    } finally {
+        socket.close()
     }
 }
 
@@ -73,11 +148,11 @@ fun decodeTorrentFile(torrentFile: String, supressOutput:Boolean = false): Map<S
     var params = mutableMapOf<String, Any>()
     params["url"] = url as Any
     params["length"] = length as Any
-    params["result"] = result as Any
+    params["info_hash"] = result as Any
     return params
 }
 
-fun getPeers(torrentInfo: Map<String, Any>) {
+fun getPeers(torrentInfo: Map<String, Any>): MutableList<String> {
     val bencode = Bencode(true)
     var params = mutableMapOf<String, String>()
     params["peer_id"] = "00112233445566778899"
@@ -88,12 +163,12 @@ fun getPeers(torrentInfo: Map<String, Any>) {
     params["compact"] = "1"
 
     val url = torrentInfo["url"].toString()
-    val getResult = getRequestWithHttpURLConnection(url, params, customUrlEncode(torrentInfo["result"].toString()))
+    val getResult = getRequestWithHttpURLConnection(url, params, customUrlEncode(torrentInfo["info_hash"].toString()))
     val response = bencode.decode(getResult, Type.DICTIONARY) as Map<String, Any>
     val peersByteBuffer = response["peers"] as ByteBuffer
     val peersByteArray = ByteArray(peersByteBuffer.remaining())
     peersByteBuffer.get(peersByteArray)
-    processPeerByteArray(peersByteArray)
+    return processPeerByteArray(peersByteArray)
 }
 
 fun customUrlEncode(input: String): String {
@@ -110,7 +185,7 @@ fun customUrlEncode(input: String): String {
     }
 }
 
-fun processPeerByteArray(peerData: ByteArray) {
+fun processPeerByteArray(peerData: ByteArray): MutableList<String> {
     val peers = mutableListOf<String>()
 
     for (i in peerData.indices step 6) {
@@ -124,6 +199,8 @@ fun processPeerByteArray(peerData: ByteArray) {
     peers.forEachIndexed { index, peer ->
         println(peer)
     }
+
+    return peers
 }
 
 fun printMap(infoData:Map<*,*>) {
