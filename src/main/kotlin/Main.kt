@@ -137,65 +137,55 @@ fun downloadPiece(torrentFile: String, outputLocation: String, pieceIndex: Strin
         //println("BitTorrent handshake response received successfully")
         println("Peer ID: ${responsePeerId.joinToString("") { "%02x".format(it) }}")
 
-
         var bitfieldReceived = false
-        var unchokeReceived = false
         val pieceLength = calculatePieceLength(info, pieceIndex.toInt())
         val blocks = mutableListOf<ByteArray>()
 
+        while (true) {
+            val messageLength = inputStream.readInt()
+            if (messageLength > 0) {
+                val messageId = inputStream.readByte().toInt()
 
-            while (true) {
-                val messageLength = inputStream.readInt()
-                if (messageLength > 0) {
-                    val messageId = inputStream.readByte().toInt()
-
-                    when (messageId) {
-                        5 -> { // Bitfield
-                            val payload = ByteArray(messageLength - 1)
-                            inputStream.readFully(payload)
-                            bitfieldReceived = true
-                            println("Received: Bitfield message")
-
-                            // Send interested message after receiving bitfield
-                            sendInterestedMessage(outputStream)
+                when (messageId) {
+                    5 -> { // Bitfield
+                        val payload = ByteArray(messageLength - 1)
+                        inputStream.readFully(payload)
+                        bitfieldReceived = true
+                        println("Received: Bitfield message")
+                        sendInterestedMessage(outputStream)
+                    }
+                    1 -> { // Unchoke
+                        println("Received: Unchoke message")
+                        if (bitfieldReceived) {
+                            requestBlocks(outputStream, pieceIndex.toInt(), pieceLength)
                         }
-                        1 -> { // Unchoke
-                            unchokeReceived = true
-                            println("Received: Unchoke message")
+                    }
+                    7 -> { // Piece
+                        val index = inputStream.readInt()
+                        val begin = inputStream.readInt()
+                        val blockLength = messageLength - 9
+                        val block = ByteArray(blockLength)
+                        inputStream.readFully(block)
 
-                            // Start requesting blocks after being unchoked
-                            if (bitfieldReceived) {
-                                requestBlocks(outputStream, pieceIndex.toInt(), pieceLength)
-                            }
-                        }
-                        7 -> { // Piece
-                            val index = inputStream.readInt()
-                            val begin = inputStream.readInt()
-                            val blockLength = messageLength - 9 // 9 = 1 (messageId) + 4 (index) + 4 (begin)
-                            val block = ByteArray(blockLength)
-                            inputStream.readFully(block)
+                        println("Received block: index=$index, begin=$begin, length=$blockLength")
+                        blocks.add(block)
 
-                            println("Received block: index=$index, begin=$begin, length=$blockLength")
-                            blocks.add(block)
-
-                            if (blocks.sumOf { it.size } >= pieceLength) {
-                                // All blocks received, combine and save
-                                val pieceData = blocks.reduce { acc, bytes -> acc + bytes }
-                                File(outputLocation).writeBytes(pieceData)
-                                println("Piece $pieceIndex downloaded to $outputLocation.")
-                                return
-                            }
+                        if (blocks.sumOf { it.size } >= pieceLength) {
+                            val pieceData = blocks.reduce { acc, bytes -> acc + bytes }
+                            File(outputLocation).writeBytes(pieceData)
+                            println("Piece $pieceIndex downloaded to $outputLocation.")
+                            return
                         }
-                        else -> {
-                            // Handle or ignore other message types
-                            val payload = ByteArray(messageLength - 1)
-                            inputStream.readFully(payload)
-                        }
+                    }
+                    else -> {
+                        val payload = ByteArray(messageLength - 1)
+                        inputStream.readFully(payload)
                     }
                 }
             }
+        }
         } finally {
-         socket.close()
+            socket.close()
         }
 
 
@@ -253,26 +243,32 @@ fun downloadPiece(torrentFile: String, outputLocation: String, pieceIndex: Strin
 //    }
 }
 
-fun requestBlocks(outputStream: DataOutputStream, pieceIndex: Int, pieceLength: Int) {
-    var begin = 0
+fun requestBlocks(outputStream: DataOutputStream, pieceIndex: Int, pieceLength: Long) {
+    var begin = 0L
     while (begin < pieceLength) {
-        val length = minOf(16384, pieceLength - begin)
-        outputStream.writeInt(13) // Message length (1 + 4 + 4 + 4)
-        outputStream.writeByte(6) // Message ID for request
+        val blockSize = minOf(16384L, pieceLength - begin)
+        outputStream.writeInt(13)
+        outputStream.writeByte(6)
         outputStream.writeInt(pieceIndex)
-        outputStream.writeInt(begin)
-        outputStream.writeInt(length)
+        outputStream.writeInt(begin.toInt())  // Be careful with this cast
+        outputStream.writeInt(blockSize.toInt())  // Be careful with this cast
         outputStream.flush()
-        println("Sent request: index=$pieceIndex, begin=$begin, length=$length")
-        begin += length
+        println("Sent request: index=$pieceIndex, begin=$begin, length=$blockSize")
+        begin += blockSize
     }
 }
 
-fun calculatePieceLength(info: Any, pieceIndex: Int): Int {
-    // You'll need to implement this function based on your torrent file structure
-    // It should return the length of the specified piece
-    // For the last piece, it might be shorter than the standard piece length
-    return 16384 // Placeholder value, replace with actual calculation
+fun calculatePieceLength(info: Map<String, Any>, pieceIndex: Int): Long {  // Return type changed to Long
+    val pieceLength = info["piece_length"] as Long
+    val pieces = (info["pieces"] as List<*>).size
+    val totalLength = info["length"] as Long
+
+    return if (pieceIndex == pieces - 1) {
+        // Last piece
+        totalLength - (pieces - 1) * pieceLength
+    } else {
+        pieceLength
+    }
 }
 
 fun sendInterestedMessage(outputStream: DataOutputStream) {
@@ -416,8 +412,10 @@ fun decodeTorrentFile(torrentFile: String, supressOutput:Boolean = false): Map<S
     val torrentData = bencode.decode(fileBytes, Type.DICTIONARY) as Map<String, Any>
     val url = torrentData["announce"]
     val info = torrentData["info"] as Map<*, *>
-    val length = info["length"]
-    val pieceLength = info["piece length"]
+    val length = info["length"] as Long  // Changed to Long
+    val pieceLength = info["piece length"] as Long
+//    val length = info["length"]
+//    val pieceLength = info["piece length"]
 
     //We need to preserve UTF-16 for the info section.
     val bencode2 = Bencode(true)
@@ -447,11 +445,20 @@ fun decodeTorrentFile(torrentFile: String, supressOutput:Boolean = false): Map<S
         println("Piece Length: $pieceLength")
         println("Piece Hashes: \n${list.joinToString(separator = "\n")}")
     }
-    var params = mutableMapOf<String, Any>()
-    params["url"] = url as Any
-    params["length"] = length as Any
-    params["info_hash"] = result as Any
-    return params
+//    var params = mutableMapOf<String, Any>()
+//    params["url"] = url as Any
+//    params["length"] = length as Any
+//    params["info_hash"] = result as Any
+
+    return mapOf(
+        "url" to (url as String),
+        "length" to length,
+        "info_hash" to result,
+        "piece_length" to pieceLength,
+        "pieces" to list
+    )
+
+    //return params
 }
 
 fun getPeers(torrentInfo: Map<String, Any>): MutableList<String> {
