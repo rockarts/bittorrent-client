@@ -54,22 +54,163 @@ fun main(args: Array<String>) {
             val torrentFile = args[3]
             val piece = args[4]
             downloadPiece(torrentFile, outputLocation, piece)
-
-
-            val bitTorrentMessageTypes = hashMapOf(
-                0 to "choke",
-                1 to "unchoke",
-                2 to "interested",
-                3 to "not interested",
-                4 to "have",
-                5 to "bitfield",
-                6 to "request",
-                7 to "piece",
-                8 to "cancel"
-            )
+        }
+        "download" -> {
+            val outputLocation = args[2]
+            val torrentFile = args[3]
+            download(outputLocation, torrentFile)
         }
         else -> println("Unknown command $command")
     }
+}
+
+fun download(outputLocation: String, torrentFile: String) {
+    val info = decodeTorrentFile(torrentFile)
+    val peers = getPeers(info)
+    val address = peers[0].split(":")
+    val host = address[0]
+    val port = address[1].toInt()
+    val socket = Socket(host, port)
+    val infoHash = info["info_hash"] as String
+
+    val outputStream = DataOutputStream(socket.getOutputStream())
+    val inputStream = DataInputStream(socket.getInputStream())
+
+    try {
+        val peerId = performHandshake(outputStream, inputStream, infoHash)
+        println("Peer ID: $peerId")
+
+        var bitfieldReceived = false
+        val totalLength = info["length"] as Long
+        val pieceLength = info["piece_length"] as Long
+        val pieces = (info["pieces"] as List<*>).size
+
+        val allPieces = mutableListOf<ByteArray>()
+
+        while (true) {
+            val messageLength = inputStream.readInt()
+            if (messageLength > 0) {
+                val messageId = inputStream.readByte().toInt()
+
+                when (messageId) {
+                    5 -> { // Bitfield
+                        val payload = ByteArray(messageLength - 1)
+                        inputStream.readFully(payload)
+                        bitfieldReceived = true
+                        println("Received: Bitfield message")
+                        sendInterestedMessage(outputStream)
+                    }
+                    1 -> { // Unchoke
+                        println("Received: Unchoke message")
+                        if (bitfieldReceived) {
+                            var pieceIndex = 0
+                            while (pieceIndex < pieces) {
+                                val pieceData = downloadPiece(pieceIndex, pieceLength, totalLength, outputStream, inputStream)
+                                if (verifyPiece(pieceData, info["pieces"] as List<String>, pieceIndex)) {
+                                    allPieces.add(pieceData)
+                                    println("Piece $pieceIndex downloaded and verified.")
+                                    pieceIndex++
+                                } else {
+                                    println("Piece $pieceIndex verification failed. Retrying...")
+                                    // No need to decrement pieceIndex, it will retry the same piece
+                                }
+                            }
+                            break // Exit the loop after downloading all pieces
+                        }
+                    }
+                    else -> {
+                        val payload = ByteArray(messageLength - 1)
+                        inputStream.readFully(payload)
+                    }
+                }
+            }
+        }
+
+        // Combine all pieces and write to the output file
+        val fullFile = allPieces.reduce { acc, bytes -> acc + bytes }
+        File(outputLocation).writeBytes(fullFile)
+        println("Downloaded ${torrentFile.split("/").last()} to $outputLocation.")
+
+    } finally {
+        socket.close()
+    }
+}
+
+fun downloadPiece(pieceIndex: Int, standardPieceLength: Long, totalLength: Long, outputStream: DataOutputStream, inputStream: DataInputStream): ByteArray {
+    val pieceLength = if (pieceIndex == (totalLength / standardPieceLength).toInt()) {
+        totalLength % standardPieceLength
+    } else {
+        standardPieceLength
+    }
+
+    val blocks = mutableListOf<ByteArray>()
+
+    requestBlocks(outputStream, pieceIndex, pieceLength)
+
+    while (blocks.sumOf { it.size.toLong() } < pieceLength) {
+        val messageLength = inputStream.readInt()
+        if (messageLength > 0) {
+            val messageId = inputStream.readByte().toInt()
+            if (messageId == 7) { // Piece
+                val index = inputStream.readInt()
+                val begin = inputStream.readInt()
+                val blockLength = messageLength - 9
+                val block = ByteArray(blockLength)
+                inputStream.readFully(block)
+                blocks.add(block)
+            }
+        }
+    }
+
+    return blocks.reduce { acc, bytes -> acc + bytes }
+}
+
+fun verifyPiece(pieceData: ByteArray, pieceHashes: List<String>, pieceIndex: Int): Boolean {
+    val digest = MessageDigest.getInstance("SHA-1")
+    val calculatedHash = digest.digest(pieceData).toHexString()
+    return calculatedHash == pieceHashes[pieceIndex]
+}
+
+fun performHandshake(outputStream: DataOutputStream, inputStream: DataInputStream, infoHash: String): String {
+    val protocolName = "BitTorrent protocol"
+    val reserved = ByteArray(8) // 8 reserved bytes, all set to 0
+    val infoHashBytes = infoHash.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+    val peerId = "00112233445566778899"
+    val peerIdBytes = peerId.toByteArray()
+
+    outputStream.writeByte(19)
+    outputStream.write(protocolName.toByteArray())
+    outputStream.write(reserved)
+    outputStream.write(infoHashBytes)
+    outputStream.write(peerIdBytes)
+    outputStream.flush()
+
+    // Receive handshake response
+    val responsePstrlen = inputStream.readByte().toInt()
+    if (responsePstrlen != 19) {
+        throw Exception("Invalid pstrlen in response: $responsePstrlen")
+    }
+
+    val responsePstr = ByteArray(19)
+    inputStream.readFully(responsePstr)
+    val responseProtocol = String(responsePstr)
+    if (responseProtocol != protocolName) {
+        throw Exception("Invalid protocol in response: $responseProtocol")
+    }
+
+    val responseReserved = ByteArray(8)
+    inputStream.readFully(responseReserved)
+
+    val responseInfoHash = ByteArray(20)
+    inputStream.readFully(responseInfoHash)
+    if (!responseInfoHash.contentEquals(infoHashBytes)) {
+        throw Exception("Info hash mismatch in response")
+    }
+
+    val responsePeerId = ByteArray(20)
+    inputStream.readFully(responsePeerId)
+
+    return responsePeerId.joinToString("") { "%02x".format(it) }
 }
 
 fun downloadPiece(torrentFile: String, outputLocation: String, pieceIndex: String) {
