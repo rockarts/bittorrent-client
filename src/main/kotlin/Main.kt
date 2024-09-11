@@ -76,16 +76,18 @@ fun main(args: Array<String>) {
 fun download(outputLocation: String, torrentFileLocation: String) {
     val torrentFile = decodeTorrentFile(torrentFileLocation)
     val peers = getPeers(torrentFile)
+    val peer = peers[0]
+    println("PEER $peer")
     val address = peers[0].split(":")
     val host = address[0]
     val port = address[1].toInt()
     val socket = Socket(host, port)
-    val infoHash = torrentFile.infoHash
+    //val infoHash = torrentFile.infoHash
 
     val outputStream = DataOutputStream(socket.getOutputStream())
     val inputStream = DataInputStream(socket.getInputStream())
 
-    try {
+    socket.use { _ ->
         val peerId = performHandshake(outputStream, inputStream, torrentFile)
         println("Peer ID: $peerId")
 
@@ -139,9 +141,6 @@ fun download(outputLocation: String, torrentFileLocation: String) {
         val fullFile = allPieces.reduce { acc, bytes -> acc + bytes }
         File(outputLocation).writeBytes(fullFile)
         println("Downloaded ${torrentFileLocation.split("/").last()} to $outputLocation.")
-
-    } finally {
-        socket.close()
     }
 }
 
@@ -183,7 +182,7 @@ fun verifyPiece(pieceData: ByteArray, pieceHashes: List<String>, pieceIndex: Int
 fun performHandshake(outputStream: DataOutputStream, inputStream: DataInputStream, torrentFile: TorrentFile): String {
     val protocolName = "BitTorrent protocol"
     val reserved = ByteArray(8) // 8 reserved bytes, all set to 0
-    val infoHashBytes =  torrentFile.infoHashBytes()
+    val infoHashBytes = torrentFile.infoHashBytes()
     val peerId = "00112233445566778899"
     val peerIdBytes = peerId.toByteArray()
 
