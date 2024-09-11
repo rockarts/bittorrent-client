@@ -11,4 +11,8 @@ class TorrentFile(
         println("Piece Length: $pieceLength")
         println("Piece Hashes: \n${pieceHashes.joinToString(separator = "\n")}")
     }
+
+    fun infoHashBytes() : ByteArray {
+        return infoHash.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+    }
 }

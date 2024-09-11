@@ -49,14 +49,13 @@ fun main(args: Array<String>) {
             val torrentFile = args[1]
             val peer = args[2]
             val torrent = decodeTorrentFile(torrentFile, true)
-            val infoHash = torrent.infoHash
 
             val address = peer.split(":")
             val host = address[0]
             val port = address[1].toInt()
 
             val peers = mutableListOf<String>() //getPeers(info)
-            performHandshake(peers, host, port, infoHash)
+            performHandshake(peers, host, port, torrent)
         }
         "download_piece" -> {
             // ./your_bittorrent.sh download_piece -o /tmp/test-piece-0 sample.torrent 0
@@ -87,7 +86,7 @@ fun download(outputLocation: String, torrentFileLocation: String) {
     val inputStream = DataInputStream(socket.getInputStream())
 
     try {
-        val peerId = performHandshake(outputStream, inputStream, infoHash)
+        val peerId = performHandshake(outputStream, inputStream, torrentFile)
         println("Peer ID: $peerId")
 
         var bitfieldReceived = false
@@ -181,10 +180,10 @@ fun verifyPiece(pieceData: ByteArray, pieceHashes: List<String>, pieceIndex: Int
     return calculatedHash == pieceHashes[pieceIndex]
 }
 
-fun performHandshake(outputStream: DataOutputStream, inputStream: DataInputStream, infoHash: String): String {
+fun performHandshake(outputStream: DataOutputStream, inputStream: DataInputStream, torrentFile: TorrentFile): String {
     val protocolName = "BitTorrent protocol"
     val reserved = ByteArray(8) // 8 reserved bytes, all set to 0
-    val infoHashBytes = infoHash.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+    val infoHashBytes =  torrentFile.infoHashBytes()
     val peerId = "00112233445566778899"
     val peerIdBytes = peerId.toByteArray()
 
@@ -445,11 +444,7 @@ fun handleCancel() {
     println("Received cancel")
 }
 
-fun performHandshake(peers: MutableList<String>, host:String, port:Int, infoHash:String) {
-//    val firstPeer = peers[0]
-//    val address = firstPeer.split(":")
-//    val host = address[0]
-//    val port = address[1].toInt()
+fun performHandshake(peers: MutableList<String>, host:String, port:Int, torrent:TorrentFile) {
     val socket = Socket(host, port)
     val outputStream = DataOutputStream(socket.getOutputStream())
     val inputStream = DataInputStream(socket.getInputStream())
@@ -457,7 +452,7 @@ fun performHandshake(peers: MutableList<String>, host:String, port:Int, infoHash
         val protocolName = "BitTorrent protocol"
         val reserved = ByteArray(8) // 8 reserved bytes, all set to 0
         // Convert infoHash and peerId from hex string to ByteArray
-        val infoHashBytes = infoHash.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val infoHashBytes = torrent.infoHashBytes()
         val peerId = "00112233445566778899"
         val peerIdBytes = peerId.toByteArray()
 
