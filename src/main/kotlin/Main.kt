@@ -284,7 +284,6 @@ fun downloadPiece(torrentFile: String, outputLocation: String, pieceIndex: Strin
         val responsePeerId = ByteArray(20)
         inputStream.readFully(responsePeerId)
 
-        //println("BitTorrent handshake response received successfully")
         println("Peer ID: ${responsePeerId.joinToString("") { "%02x".format(it) }}")
 
         var bitfieldReceived = false
@@ -356,7 +355,7 @@ fun requestBlocks(outputStream: DataOutputStream, pieceIndex: Int, pieceLength: 
 
 fun calculatePieceLength(info: TorrentFile, pieceIndex: Int): Long {  // Return type changed to Long
     val pieceLength = info.pieceLength
-    val pieces = (info.pieces as List<*>).size
+    val pieces = info.pieceHashes.size
     val totalLength = info.length
 
     return if (pieceIndex == pieces - 1) {
