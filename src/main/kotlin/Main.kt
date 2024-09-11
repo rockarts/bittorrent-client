@@ -13,6 +13,16 @@ import java.net.URLEncoder
 
 val gson = Gson()
 
+/*
+Optional: To improve download speeds, you can download from multiple peers at once.
+You could have a work queue consisting of each piece that needs to be downloaded.
+Your worker (connection with a peer) could pick a piece from the work queue, attempt to download it,
+check the integrity, and write the downloaded piece into a buffer.
+Any failure (network issue, hashes not matching, peer not having the piece etc.) would put the piece
+back into the work queue to be tried again.
+ */
+
+
 fun main(args: Array<String>) {
     val command = args[0]
     when (command) {
@@ -38,8 +48,8 @@ fun main(args: Array<String>) {
             // ./your_bittorrent.sh handshake sample.torrent <peer_ip>:<peer_port>
             val torrentFile = args[1]
             val peer = args[2]
-            val info = decodeTorrentFile(torrentFile, true)
-            val infoHash = info.get("info_hash").toString()
+            val torrent = decodeTorrentFile(torrentFile, true)
+            val infoHash = torrent.infoHash
 
             val address = peer.split(":")
             val host = address[0]
@@ -64,14 +74,14 @@ fun main(args: Array<String>) {
     }
 }
 
-fun download(outputLocation: String, torrentFile: String) {
-    val info = decodeTorrentFile(torrentFile)
-    val peers = getPeers(info)
+fun download(outputLocation: String, torrentFileLocation: String) {
+    val torrentFile = decodeTorrentFile(torrentFileLocation)
+    val peers = getPeers(torrentFile)
     val address = peers[0].split(":")
     val host = address[0]
     val port = address[1].toInt()
     val socket = Socket(host, port)
-    val infoHash = info["info_hash"] as String
+    val infoHash = torrentFile.infoHash
 
     val outputStream = DataOutputStream(socket.getOutputStream())
     val inputStream = DataInputStream(socket.getInputStream())
@@ -81,9 +91,9 @@ fun download(outputLocation: String, torrentFile: String) {
         println("Peer ID: $peerId")
 
         var bitfieldReceived = false
-        val totalLength = info["length"] as Long
-        val pieceLength = info["piece_length"] as Long
-        val pieces = (info["pieces"] as List<*>).size
+        val totalLength = torrentFile.length
+        val pieceLength = torrentFile.pieceLength
+        val pieces = torrentFile.pieceHashes.size
 
         val allPieces = mutableListOf<ByteArray>()
 
@@ -106,7 +116,7 @@ fun download(outputLocation: String, torrentFile: String) {
                             var pieceIndex = 0
                             while (pieceIndex < pieces) {
                                 val pieceData = downloadPiece(pieceIndex, pieceLength, totalLength, outputStream, inputStream)
-                                if (verifyPiece(pieceData, info["pieces"] as List<String>, pieceIndex)) {
+                                if (verifyPiece(pieceData, torrentFile.pieceHashes, pieceIndex)) {
                                     allPieces.add(pieceData)
                                     println("Piece $pieceIndex downloaded and verified.")
                                     pieceIndex++
@@ -129,7 +139,7 @@ fun download(outputLocation: String, torrentFile: String) {
         // Combine all pieces and write to the output file
         val fullFile = allPieces.reduce { acc, bytes -> acc + bytes }
         File(outputLocation).writeBytes(fullFile)
-        println("Downloaded ${torrentFile.split("/").last()} to $outputLocation.")
+        println("Downloaded ${torrentFileLocation.split("/").last()} to $outputLocation.")
 
     } finally {
         socket.close()
@@ -229,7 +239,7 @@ fun downloadPiece(torrentFile: String, outputLocation: String, pieceIndex: Strin
     val host = address[0]
     val port = address[1].toInt()
     val socket = Socket(host, port)
-    val infoHash = info.get("info_hash").toString()
+    val infoHash = info.infoHash
 
     val outputStream = DataOutputStream(socket.getOutputStream())
     val inputStream = DataInputStream(socket.getInputStream())
@@ -328,60 +338,6 @@ fun downloadPiece(torrentFile: String, outputLocation: String, pieceIndex: Strin
         } finally {
             socket.close()
         }
-
-
-
-//        val downloaded = false
-//        /// Read 4 bytes for message length
-//        //while(!downloaded) {
-//            val messageLength = inputStream.readInt()
-//            println("Message Length: $messageLength")
-//            if (messageLength > 0) {
-//                var messageId = inputStream.readByte().toInt()
-//
-//                println("Message ID: $messageId")
-//
-//                val payload = ByteArray(messageLength - 1)
-//                inputStream.readFully(payload)
-//
-//                //Send interested message
-//                sendInterestedMessage(outputStream)
-//
-//                //Listen for unchoke
-//                while(messageId != 1) {
-//                    messageId = inputStream.readByte().toInt()
-//                    println("Message ID: $messageId")
-//                }
-//
-//                sendRequest(outputStream, 0, 0, (16 * 1024))
-//
-//                //Listen for piece
-//                while(messageId != 7) {
-//                    messageId = inputStream.readByte().toInt()
-//                    val piecePayload = ByteArray(messageLength - 1)
-//                    inputStream.readFully(piecePayload)
-//                    println("Message ID: $messageId")
-//                }
-//
-
-//                when (messageId) {
-//                    0 -> handleChoke()
-//                    1 -> handleUnchoke()
-//                    2 -> handleInterested()
-//                    3 -> handleNotInterested()
-//                    4 -> handleHave(payload)
-//                    5 -> handleBitfield(payload, outputStream)
-//                    6 -> handleRequest()
-//                    7 -> handlePiece()
-//                    8 -> handleCancel()
-//                }
-//            }
-//
-//        File(outputLocation).writeBytes(pieceData)
-//        println("Piece $piece downloaded successfully to $outputLocation")
-//    } finally {
-//        socket.close()
-//    }
 }
 
 fun requestBlocks(outputStream: DataOutputStream, pieceIndex: Int, pieceLength: Long) {
@@ -391,18 +347,18 @@ fun requestBlocks(outputStream: DataOutputStream, pieceIndex: Int, pieceLength: 
         outputStream.writeInt(13)
         outputStream.writeByte(6)
         outputStream.writeInt(pieceIndex)
-        outputStream.writeInt(begin.toInt())  // Be careful with this cast
-        outputStream.writeInt(blockSize.toInt())  // Be careful with this cast
+        outputStream.writeInt(begin.toInt())
+        outputStream.writeInt(blockSize.toInt())
         outputStream.flush()
         println("Sent request: index=$pieceIndex, begin=$begin, length=$blockSize")
         begin += blockSize
     }
 }
 
-fun calculatePieceLength(info: Map<String, Any>, pieceIndex: Int): Long {  // Return type changed to Long
-    val pieceLength = info["piece_length"] as Long
-    val pieces = (info["pieces"] as List<*>).size
-    val totalLength = info["length"] as Long
+fun calculatePieceLength(info: TorrentFile, pieceIndex: Int): Long {  // Return type changed to Long
+    val pieceLength = info.pieceLength
+    val pieces = (info.pieces as List<*>).size
+    val totalLength = info.length
 
     return if (pieceIndex == pieces - 1) {
         // Last piece
@@ -546,7 +502,7 @@ fun performHandshake(peers: MutableList<String>, host:String, port:Int, infoHash
     }
 }
 
-fun decodeTorrentFile(torrentFile: String, supressOutput:Boolean = false): Map<String, Any> {
+fun decodeTorrentFile(torrentFile: String, supressOutput:Boolean = false): TorrentFile {
     val fileBytes = File(torrentFile).readBytes()
     //Decode the non UTF-16 data normally
     val bencode = Bencode(false)
@@ -555,8 +511,6 @@ fun decodeTorrentFile(torrentFile: String, supressOutput:Boolean = false): Map<S
     val info = torrentData["info"] as Map<*, *>
     val length = info["length"] as Long  // Changed to Long
     val pieceLength = info["piece length"] as Long
-//    val length = info["length"]
-//    val pieceLength = info["piece length"]
 
     //We need to preserve UTF-16 for the info section.
     val bencode2 = Bencode(true)
@@ -565,55 +519,41 @@ fun decodeTorrentFile(torrentFile: String, supressOutput:Boolean = false): Map<S
     val map = infoData["info"] as Map<*, *>
 
     var index = 0
-    val list = mutableListOf<String>()
+    val pieceHashes = mutableListOf<String>()
     val buffer = map["pieces"] as ByteBuffer
-    val byteArray = buffer.array()
-    while ((index * 20) + 20 <= byteArray.size) {
-        val chunk = byteArray.sliceArray(index * 20..<(index * 20) + 20)
-        list.add(chunk.toHexString())
+    val pieces = buffer.array()
+
+    while ((index * 20) + 20 <= pieces.size) {
+        val chunk = pieces.sliceArray(index * 20..<(index * 20) + 20)
+        pieceHashes.add(chunk.toHexString())
         index += 1
     }
 
     val encodedInfo = bencode2.encode(map)
     val digest = MessageDigest.getInstance("SHA-1")
     val bytes = digest.digest(encodedInfo)
-    val result = bytes.toHexString()
+    val infoHash = bytes.toHexString()
 
+    val torrent = TorrentFile(url.toString(), info, length, pieceLength, infoHash, pieceHashes, pieces)
     if (!supressOutput) {
-        println("Tracker URL: $url")
-        println("Length: $length")
-        println("Info Hash: $result")
-        println("Piece Length: $pieceLength")
-        println("Piece Hashes: \n${list.joinToString(separator = "\n")}")
+        torrent.print()
     }
-//    var params = mutableMapOf<String, Any>()
-//    params["url"] = url as Any
-//    params["length"] = length as Any
-//    params["info_hash"] = result as Any
 
-    return mapOf(
-        "url" to (url as String),
-        "length" to length,
-        "info_hash" to result,
-        "piece_length" to pieceLength,
-        "pieces" to list
-    )
-
-    //return params
+    return torrent
 }
 
-fun getPeers(torrentInfo: Map<String, Any>): MutableList<String> {
+fun getPeers(torrentInfo:TorrentFile): MutableList<String> {
     val bencode = Bencode(true)
     var params = mutableMapOf<String, String>()
     params["peer_id"] = "00112233445566778899"
     params["port"] = "6881"
     params["uploaded"] = "0"
     params["downloaded"] = "0"
-    params["left"] = (torrentInfo["length"] as? Long)?.toString() ?: "0"//Length field
+    params["left"] = torrentInfo.length.toString()
     params["compact"] = "1"
 
-    val url = torrentInfo["url"].toString()
-    val getResult = getRequestWithHttpURLConnection(url, params, customUrlEncode(torrentInfo["info_hash"].toString()))
+    val url = torrentInfo.announceUrl
+    val getResult = getRequestWithHttpURLConnection(url, params, customUrlEncode(torrentInfo.infoHash))
     val response = bencode.decode(getResult, Type.DICTIONARY) as Map<String, Any>
     val peersByteBuffer = response["peers"] as ByteBuffer
     val peersByteArray = ByteArray(peersByteBuffer.remaining())
