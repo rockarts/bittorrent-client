@@ -8,8 +8,12 @@ import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.net.HttpURLConnection
 import java.net.Socket
+import java.net.URI
 import java.net.URL
+import java.net.URLDecoder
 import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.ConcurrentLinkedQueue
 
 val gson = Gson()
 
@@ -69,8 +73,35 @@ fun main(args: Array<String>) {
             val torrentFile = args[3]
             download(outputLocation, torrentFile)
         }
+        "magnet_parse" -> {
+            //magnet:?xt=urn:btih:d69f91e6b2ae4c542468d1073a71d4ea13879a7f&dn=sample.torrent&tr=http%3A%2F%2Fbittorrent-test-tracker.codecrafters.io%2Fannounce
+            val link = args[1]
+            magnetParse(link)
+        }
         else -> println("Unknown command $command")
     }
+}
+
+fun magnetParse(link: String) {
+    val removed = link.removePrefix("magnet:?")
+    val params = removed.split("&")
+
+    var hash = ""
+    var trackerUrl = ""
+
+    for (param in params) {
+        if (param.startsWith("xt=urn:btih:")) {
+            hash = param.removePrefix("xt=urn:btih:")
+        }
+
+        if (param.startsWith("tr=")) {
+            trackerUrl = URLDecoder.decode( param.removePrefix("tr="), StandardCharsets.UTF_8.toString())
+        }
+    }
+    //Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce
+    //Info Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f
+    println("Tracker URL: $trackerUrl")
+    println("Info Hash: $hash")
 }
 
 fun download(outputLocation: String, torrentFileLocation: String) {
@@ -82,7 +113,6 @@ fun download(outputLocation: String, torrentFileLocation: String) {
     val host = address[0]
     val port = address[1].toInt()
     val socket = Socket(host, port)
-    //val infoHash = torrentFile.infoHash
 
     val outputStream = DataOutputStream(socket.getOutputStream())
     val inputStream = DataInputStream(socket.getInputStream())
@@ -96,8 +126,13 @@ fun download(outputLocation: String, torrentFileLocation: String) {
         val pieceLength = torrentFile.pieceLength
         val pieces = torrentFile.pieceHashes.size
 
-        val allPieces = mutableListOf<ByteArray>()
+        //Initialize a workQueue
+        val workQueue = ConcurrentLinkedQueue<Int>()
+        for (i in 0 until pieces) {
+            workQueue.offer(i)
+        }
 
+        val allPieces = mutableListOf<ByteArray>()
         while (true) {
             val messageLength = inputStream.readInt()
             if (messageLength > 0) {
