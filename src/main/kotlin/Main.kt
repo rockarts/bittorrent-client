@@ -1,6 +1,7 @@
 import com.google.gson.Gson
 import com.dampcake.bencode.Bencode
 import com.dampcake.bencode.Type
+import main.kotlin.Magnet
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -8,7 +9,6 @@ import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.net.HttpURLConnection
 import java.net.Socket
-import java.net.URI
 import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -76,13 +76,26 @@ fun main(args: Array<String>) {
         "magnet_parse" -> {
             //magnet:?xt=urn:btih:d69f91e6b2ae4c542468d1073a71d4ea13879a7f&dn=sample.torrent&tr=http%3A%2F%2Fbittorrent-test-tracker.codecrafters.io%2Fannounce
             val link = args[1]
-            magnetParse(link)
+            val magnet = magnetParse(link)
+            //Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce
+            //Info Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f
+            println("Tracker URL: ${magnet.trackerUrl}")
+            println("Info Hash: ${magnet.infoHash}")
+        }
+        "magnet_handshake" -> {
+//            $ ./your_bittorrent.sh magnet_handshake <magnet-link>
+//            Peer ID: 0102030405060708090a0b0c0d0e0f1011121314
+            val link = args[1]
+            val magnet = magnetParse(link)
+            val peers = getPeers(magnet.trackerUrl, magnet.infoHash, "999")
+            println(peers[0])
+            //performHandshake(peers)
         }
         else -> println("Unknown command $command")
     }
 }
 
-fun magnetParse(link: String) {
+fun magnetParse(link: String): Magnet {
     val removed = link.removePrefix("magnet:?")
     val params = removed.split("&")
 
@@ -98,10 +111,8 @@ fun magnetParse(link: String) {
             trackerUrl = URLDecoder.decode( param.removePrefix("tr="), StandardCharsets.UTF_8.toString())
         }
     }
-    //Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce
-    //Info Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f
-    println("Tracker URL: $trackerUrl")
-    println("Info Hash: $hash")
+
+    return Magnet(trackerUrl, hash)
 }
 
 fun download(outputLocation: String, torrentFileLocation: String) {
@@ -571,17 +582,21 @@ fun decodeTorrentFile(torrentFile: String, supressOutput:Boolean = false): Torre
 }
 
 fun getPeers(torrentInfo:TorrentFile): MutableList<String> {
+    return getPeers(announceUrl = torrentInfo.announceUrl, torrentInfo.infoHash, torrentInfo.length.toString())
+}
+
+fun getPeers(announceUrl:String, hash:String, left:String): MutableList<String> {
     val bencode = Bencode(true)
     var params = mutableMapOf<String, String>()
     params["peer_id"] = "00112233445566778899"
     params["port"] = "6881"
     params["uploaded"] = "0"
     params["downloaded"] = "0"
-    params["left"] = torrentInfo.length.toString()
+    params["left"] = left
     params["compact"] = "1"
 
-    val url = torrentInfo.announceUrl
-    val getResult = getRequestWithHttpURLConnection(url, params, customUrlEncode(torrentInfo.infoHash))
+    val url = announceUrl
+    val getResult = getRequestWithHttpURLConnection(url, params, customUrlEncode(hash))
     val response = bencode.decode(getResult, Type.DICTIONARY) as Map<String, Any>
     val peersByteBuffer = response["peers"] as ByteBuffer
     val peersByteArray = ByteArray(peersByteBuffer.remaining())
